@@ -1,6 +1,7 @@
-[package]
-name = "aura-l2"
-version = "0.1.0"
-edition = "2024"
+[workspace]
+members = ["core", "api", "indexer"]
+resolver = "2"
 
-[dependencies]
+[workspace.dependencies]
+tokio = { version = "1.49.0", features = ["full"] }
+alloy = { version = "1.7.3", features = ["full"] }
