@@ -1,5 +1,5 @@
 [workspace]
-members = ["core", "api", "indexer"]
+members = ["core", "api", "ingestor"]
 resolver = "2"
 
 [workspace.dependencies]

@@ -1,0 +1,17 @@
+[package]
+name = "aura-l2-ingestor"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "ingestor"
+path = "src/main.rs"
+
+[dependencies]
+tokio = { workspace = true }
+alloy = { workspace = true }
+eyre = "0.6.12"
+tracing = { version = "0.1.44", features = ["log"] }
+tracing-subscriber = { version = "0.3.22", features = ["registry", "env-filter"] }
+futures-util = "0.3.32"
+dotenvy = "0.15.7"
