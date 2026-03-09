@@ -1053,9 +1053,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "aura-l2-core"
+name = "aura-l2-executor"
 version = "0.1.0"
 dependencies = [
+ "alloy",
  "tokio",
 ]
 

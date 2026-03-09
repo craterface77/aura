@@ -1,11 +1,12 @@
 [package]
-name = "aura-l2-core"
+name = "aura-l2-executor"
 version = "0.1.0"
 edition = "2024"
 
 [[bin]]
-name = "core"
+name = "executor"
 path = "src/main.rs"
 
 [dependencies]
 tokio = { workspace = true }
+alloy = {workspace = true}
