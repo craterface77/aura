@@ -1,0 +1,97 @@
+# Aura L2 — Local Development Stack
+#
+# Startup order:
+#   1. anvil     — local Ethereum node (health-checked via cast block-number)
+#   2. deployer  — deploys AuraL1Bridge, writes BRIDGE_CONTRACT to .env
+#   3. ingestor  — reads .env, connects to Anvil WS, runs StateEngine
+#
+# One command to start everything:
+#   docker-compose up --build
+#
+# To trigger a test deposit (from another terminal):
+#   docker-compose run --rm deployer sh -c "
+#     cd /app/contracts && forge script script/Deposit.s.sol \
+#       --rpc-url http://anvil:8545 \
+#       --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
+#       --broadcast"
+
+services:
+  # ---- Local Ethereum node ----
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    entrypoint:
+      - anvil
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8545"
+      # Disable automining — mine a block every 2 seconds (like a real chain)
+      - --block-time
+      - "2"
+    ports:
+      - "8545:8545"
+    networks:
+      - aura-net
+    healthcheck:
+      # cast block-number returns exit 0 when Anvil is ready to handle RPC
+      test:
+        - CMD
+        - cast
+        - block-number
+        - --rpc-url
+        - http://localhost:8545
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 3s
+
+  # ---- Contract deployer (one-shot init container) ----
+  deployer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.deployer
+    volumes:
+      # .env is shared between deployer (write) and ingestor (read)
+      - ./.env:/app/.env
+      # Broadcast output is written into the contracts directory
+      - ./contracts:/app/contracts
+    networks:
+      - aura-net
+    environment:
+      - ANVIL_URL=http://anvil:8545
+    depends_on:
+      anvil:
+        condition: service_healthy
+    # deployer exits 0 on success — docker-compose tracks service_completed_successfully
+
+  # ---- Ingestor + embedded StateEngine ----
+  ingestor:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: runtime
+    volumes:
+      # Read the .env that deployer wrote
+      - ./.env:/app/.env
+      # Persist RocksDB state across container restarts
+      - state-data:/app/data
+    networks:
+      - aura-net
+    depends_on:
+      deployer:
+        condition: service_completed_successfully
+    environment:
+      - RUST_LOG=info
+      # STATE_DB_PATH is also set inside .env, but this env var takes precedence
+      # via dotenvy's behavior (env vars override .env file values).
+      - STATE_DB_PATH=/app/data/state
+    restart: on-failure
+
+networks:
+  aura-net:
+    driver: bridge
+
+volumes:
+  # Named volume for RocksDB persistence across docker-compose down/up cycles.
+  # Use `docker-compose down -v` to also delete the state.
+  state-data:
