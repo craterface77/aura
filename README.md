@@ -362,3 +362,35 @@ aura/
 - **Per-root withdrawal tracking** — `mapping(stateRoot => mapping(address => withdrawn))` prevents double-spending without an explicit reset
 - **Checks-effects-interactions** — withdrawal counter updated before ETH transfer
 - **Operator key** — the account that posts state roots; in production this would be a multisig or ZK verifier
+
+---
+
+## Future Roadmap
+
+### Sequencer Loop
+
+Accumulate transactions in a mempool (`tokio::sync::mpsc`) and apply them in batches every 500ms, then auto-post the new state root to L1. Currently every `POST /tx` commits immediately — a sequencer loop would make this a true L2 sequencer.
+
+### ZK Proof Generation
+
+Replace the trusted operator model with a mathematical guarantee. Integrate [SP1](https://github.com/succinctlabs/sp1) or [RISC Zero](https://risczero.com/) to generate a ZK proof for each batch of state transitions. `updateStateRoot` on L1 would then verify a proof instead of trusting the operator's signature — turning Aura from an optimistic into a **ZK-rollup**.
+
+### Fraud Proof Window
+
+Add a 7-day challenge period to `updateStateRoot`. During this window, anyone can submit a fraud proof to dispute an invalid root. This is the alternative to ZK — the approach used by Optimism and Arbitrum.
+
+### Data Availability
+
+The state root alone is not enough for trustless exits — users need the raw data to reconstruct their balance proofs. Post batch calldata to L1 (expensive) or integrate a dedicated DA layer like [Celestia](https://celestia.org/) or EigenDA (cheap). Without DA, users cannot exit if the operator disappears.
+
+### Forced Exits
+
+Add a `forceWithdraw` path to `AuraL1Bridge.sol` that allows users to exit directly via L1 even if the sequencer is offline or censoring their transactions.
+
+### Multi-token Support
+
+Extend the leaf schema to `keccak256(keccak256(address || token || balance))` to support ERC-20 tokens alongside native ETH.
+
+### Transaction History (PostgreSQL)
+
+Add a cold analytics path: persist transaction history to PostgreSQL via `sqlx` for block explorer queries. RocksDB remains the hot state store; Postgres handles `SELECT` history.
