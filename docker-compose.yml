@@ -3,18 +3,10 @@
 # Startup order:
 #   1. anvil     — local Ethereum node (health-checked via cast block-number)
 #   2. deployer  — deploys AuraL1Bridge, writes BRIDGE_CONTRACT to .env
-#   3. ingestor  — reads .env, connects to Anvil WS, runs StateEngine
-#   4. api       — gRPC :50051 + REST :3000, reads same RocksDB as ingestor
+#   3. api       — gRPC :50051 + REST :3000, primary RocksDB, embedded L1 ingestor
 #
 # One command to start everything:
 #   docker-compose up --build
-#
-# To trigger a test deposit (from another terminal):
-#   docker-compose run --rm deployer sh -c "
-#     cd /app/contracts && forge script script/Deposit.s.sol \
-#       --rpc-url http://anvil:8545 \
-#       --private-key 0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80 \
-#       --broadcast"
 
 services:
   # ---- Local Ethereum node ----
@@ -26,7 +18,6 @@ services:
       - "0.0.0.0"
       - --port
       - "8545"
-      # Disable automining — mine a block every 2 seconds (like a real chain)
       - --block-time
       - "2"
     ports:
@@ -34,7 +25,6 @@ services:
     networks:
       - aura-net
     healthcheck:
-      # cast block-number returns exit 0 when Anvil is ready to handle RPC
       test:
         - CMD
         - cast
@@ -52,9 +42,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.deployer
     volumes:
-      # .env is shared between deployer (write) and ingestor (read)
       - ./.env:/app/.env
-      # Broadcast output is written into the contracts directory
       - ./contracts:/app/contracts
     networks:
       - aura-net
@@ -63,39 +51,19 @@ services:
     depends_on:
       anvil:
         condition: service_healthy
-    # deployer exits 0 on success — docker-compose tracks service_completed_successfully
 
-  # ---- Ingestor + embedded StateEngine ----
-  ingestor:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: ingestor-runtime
-    volumes:
-      # Read the .env that deployer wrote
-      - ./.env:/app/.env
-      # Persist RocksDB state across container restarts
-      - state-data:/app/data
-    networks:
-      - aura-net
-    depends_on:
-      deployer:
-        condition: service_completed_successfully
-    environment:
-      - RUST_LOG=info
-      # STATE_DB_PATH is also set inside .env, but this env var takes precedence
-      # via dotenvy's behavior (env vars override .env file values).
-      - STATE_DB_PATH=/app/data/state
-    restart: on-failure
-
-  # ---- API server (gRPC + REST) ----
+  # ---- API server: gRPC + REST + embedded L1 ingestor ----
+  #
+  # Holds primary RocksDB lock. Ingestor runs as a tokio task inside this process,
+  # writing L1 deposits directly into the same StateEngine. POST /tx commits
+  # transfers via commit_transfer (revm simulate → RocksDB write → SMT update).
   api:
     build:
       context: .
       dockerfile: Dockerfile
       target: api-runtime
     volumes:
-      # Shared RocksDB volume — api reads state written by ingestor
+      - ./.env:/app/.env
       - state-data:/app/data
     networks:
       - aura-net
@@ -103,8 +71,8 @@ services:
       - "50051:50051"   # gRPC
       - "3000:3000"     # REST
     depends_on:
-      ingestor:
-        condition: service_started
+      deployer:
+        condition: service_completed_successfully
     environment:
       - RUST_LOG=info
       - STATE_DB_PATH=/app/data/state
@@ -117,6 +85,4 @@ networks:
     driver: bridge
 
 volumes:
-  # Named volume for RocksDB persistence across docker-compose down/up cycles.
-  # Use `docker-compose down -v` to also delete the state.
   state-data:

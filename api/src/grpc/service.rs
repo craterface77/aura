@@ -5,7 +5,7 @@ use tonic::{Request, Response, Status};
 
 use crate::app_state::AppState;
 use crate::error::ApiError;
-use executor::{simulate_transfer, TransferRequest};
+use executor::{commit_transfer, TransferRequest};
 
 use super::proto::aura_l2_server::AuraL2;
 use super::proto::{
@@ -29,8 +29,7 @@ impl AuraL2 for AuraL2Service {
         &self,
         request: Request<ProtoTransferRequest>,
     ) -> Result<Response<TransactionResponse>, Status> {
-        self.state.catch_up();
-        let req = request.into_inner();
+let req = request.into_inner();
 
         let from: Address = req
             .from
@@ -45,20 +44,18 @@ impl AuraL2 for AuraL2Service {
             .parse()
             .map_err(|_| Status::from(ApiError::InvalidValue(req.value.clone())))?;
 
-        // simulate_transfer is synchronous (revm); run on blocking thread pool (Rustcamp 3.11)
         let engine = Arc::clone(&self.state.engine);
         let result = tokio::task::spawn_blocking(move || {
-            simulate_transfer(engine, TransferRequest { from, to, value })
+            commit_transfer(engine, TransferRequest { from, to, value })
         })
         .await
         .map_err(|e| Status::internal(format!("join error: {e}")))?
         .map_err(|e| Status::from(ApiError::Executor(e)))?;
 
         Ok(Response::new(TransactionResponse {
-            success: result.success,
             gas_used: result.gas_used,
-            revert_reason: result.revert_reason.unwrap_or_default(),
             new_sender_balance: result.new_sender_balance.to_string(),
+            new_state_root: format!("0x{}", hex::encode(result.new_state_root.0)),
         }))
     }
 
@@ -66,8 +63,7 @@ impl AuraL2 for AuraL2Service {
         &self,
         request: Request<AccountProofRequest>,
     ) -> Result<Response<AccountProofResponse>, Status> {
-        self.state.catch_up();
-        let addr_str = request.into_inner().address;
+let addr_str = request.into_inner().address;
         let address: Address = addr_str
             .parse()
             .map_err(|_| Status::from(ApiError::InvalidAddress(addr_str)))?;
@@ -98,8 +94,7 @@ impl AuraL2 for AuraL2Service {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<StateRootResponse>, Status> {
-        self.state.catch_up();
-        let root = self.state.engine.state_root();
+let root = self.state.engine.state_root();
         Ok(Response::new(StateRootResponse {
             state_root: format!("0x{}", hex::encode(root.0)),
         }))

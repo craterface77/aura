@@ -7,7 +7,6 @@ use std::sync::{Arc, RwLock};
 
 pub struct StateEngine<S> {
     backend: Arc<S>,
-    /// In-memory SMT. Write-locked only during `apply_deposit`.
     tree: Arc<RwLock<SparseMerkleTree>>,
 }
 
@@ -50,11 +49,6 @@ impl<S: StateBackend> StateEngine<S> {
 
     /// Applies a deposit: adds `amount` to `address` balance, persists to
     /// RocksDB, updates the SMT leaf, and returns the new `StateRoot`.
-    ///
-    /// Called from the Tokio event-processor task (Rustcamp 3.11).
-    /// `apply_deposit` is synchronous - RocksDB writes are fast enough to call
-    /// directly from async context via `tokio::spawn`. If this ever becomes a
-    /// bottleneck, migrate to `tokio::task::spawn_blocking`.
     pub fn apply_deposit(&self, address: Address, amount: U256) -> StateResult<StateRoot> {
         let mut account = match self.backend.get_account(&address)? {
             Some(existing) => {
@@ -89,6 +83,74 @@ impl<S: StateBackend> StateEngine<S> {
             balance = ?account.balance,
             root = %new_root,
             "Deposit applied — state root updated"
+        );
+
+        Ok(new_root)
+    }
+
+    /// Applies a transfer between two L2 accounts.
+    ///
+    /// Validates balance and deducts `amount + gas_cost` from sender,
+    /// credits `amount` to recipient, increments sender nonce,
+    /// persists both accounts to RocksDB, and updates the SMT.
+    /// Returns the new `StateRoot`.
+    pub fn apply_transfer(
+        &self,
+        from: Address,
+        to: Address,
+        amount: U256,
+        gas_cost: U256,
+    ) -> StateResult<StateRoot> {
+        let total_debit = amount
+            .checked_add(gas_cost)
+            .ok_or(StateError::MerkleProofInvalid)?; // overflow guard
+
+        let mut sender = self
+            .backend
+            .get_account(&from)?
+            .ok_or(StateError::AccountNotFound(from))?;
+
+        if sender.balance < total_debit {
+            return Err(StateError::InsufficientBalance {
+                have: sender.balance,
+                need: total_debit,
+            });
+        }
+
+        sender.balance -= total_debit;
+        sender.nonce = AccountNonce(sender.nonce.0 + 1);
+        self.backend.put_account(&from, &sender)?;
+
+        let mut recipient = match self.backend.get_account(&to)? {
+            Some(existing) => existing,
+            None => {
+                let index = self.backend.increment_next_index()?;
+                tracing::info!(?to, index, "New account registered");
+                AccountData::zero(MerkleIndex(index))
+            }
+        };
+
+        recipient.balance = recipient
+            .balance
+            .checked_add(amount)
+            .ok_or(StateError::MerkleProofInvalid)?;
+        self.backend.put_account(&to, &recipient)?;
+
+        let sender_leaf = sender.leaf_hash(&from);
+        let recipient_leaf = recipient.leaf_hash(&to);
+        let new_root = {
+            let mut tree = self.tree.write().map_err(|_| StateError::LockPoisoned)?;
+            tree.update(sender.merkle_index, sender_leaf);
+            tree.update(recipient.merkle_index, recipient_leaf)
+        };
+
+        tracing::info!(
+            ?from,
+            ?to,
+            amount = ?amount,
+            gas_cost = ?gas_cost,
+            root = %new_root,
+            "Transfer applied — state root updated"
         );
 
         Ok(new_root)

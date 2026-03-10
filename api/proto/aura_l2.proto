@@ -12,10 +12,9 @@ message TransferRequest {
 }
 
 message TransactionResponse {
-  bool   success            = 1;
-  uint64 gas_used           = 2;
-  string revert_reason      = 3;   // empty string when success == true
-  string new_sender_balance = 4;   // decimal wei string
+  uint64 gas_used           = 1;
+  string new_sender_balance = 2;   // decimal wei string
+  string new_state_root     = 3;   // 0x-prefixed hex — updated after commit
 }
 
 // GetAccountProof

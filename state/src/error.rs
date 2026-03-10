@@ -14,6 +14,15 @@ pub enum StateError {
     #[error("Merkle proof verification failed")]
     MerkleProofInvalid,
 
+    #[error("Insufficient balance: have {have}, need {need}")]
+    InsufficientBalance {
+        have: alloy::primitives::U256,
+        need: alloy::primitives::U256,
+    },
+
+    #[error("Nonce mismatch: expected {expected}, got {got}")]
+    NonceMismatch { expected: u64, got: u64 },
+
     #[error("Lock poisoned")]
     LockPoisoned,
 }

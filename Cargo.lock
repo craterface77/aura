@@ -1071,6 +1071,7 @@ version = "0.1.0"
 dependencies = [
  "alloy",
  "aura-l2-executor",
+ "aura-l2-ingestor",
  "aura-l2-state",
  "axum",
  "dotenvy",

@@ -24,6 +24,12 @@ pub struct SimulationResult {
     pub new_sender_balance: U256,
 }
 
+pub struct CommitResult {
+    pub gas_used: u64,
+    pub new_sender_balance: U256,
+    pub new_state_root: state::StateRoot,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ExecutorError {
     #[error("State error: {0}")]
@@ -147,6 +153,32 @@ pub fn simulate_transfer<S: StateBackend>(
     })
 }
 
+pub fn commit_transfer<S: StateBackend>(
+    engine: Arc<StateEngine<S>>,
+    request: TransferRequest,
+) -> Result<CommitResult, ExecutorError> {
+    let sim = simulate_transfer(Arc::clone(&engine), TransferRequest {
+        from: request.from,
+        to: request.to,
+        value: request.value,
+    })?;
+
+    if !sim.success {
+        return Err(ExecutorError::Evm(
+            sim.revert_reason.unwrap_or_else(|| "execution reverted".into()),
+        ));
+    }
+
+    let gas_cost = U256::from(sim.gas_used);
+    let new_state_root = engine.apply_transfer(request.from, request.to, request.value, gas_cost)?;
+
+    Ok(CommitResult {
+        gas_used: sim.gas_used,
+        new_sender_balance: sim.new_sender_balance,
+        new_state_root,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -261,5 +293,55 @@ mod tests {
             balance_before,
             "simulation must not change Alice's balance in StateEngine"
         );
+    }
+
+    #[test]
+    fn commit_transfer_mutates_state() {
+        let (engine, _dir) = make_engine();
+
+        engine.apply_deposit(alice(), one_eth() * U256::from(2)).unwrap();
+        let root_before = engine.state_root();
+
+        let result = commit_transfer(
+            Arc::clone(&engine),
+            TransferRequest { from: alice(), to: bob(), value: one_eth() },
+        )
+        .unwrap();
+
+        assert_eq!(result.gas_used, 21_000);
+        assert_ne!(engine.state_root(), root_before, "root must change after commit");
+
+        let gas_cost = U256::from(21_000u64);
+        let expected_alice = one_eth() * U256::from(2) - one_eth() - gas_cost;
+        assert_eq!(engine.get_account(&alice()).unwrap().balance, expected_alice);
+        assert_eq!(engine.get_account(&bob()).unwrap().balance, one_eth());
+    }
+
+    #[test]
+    fn commit_transfer_fails_on_insufficient_balance() {
+        let (engine, _dir) = make_engine();
+
+        let err = commit_transfer(
+            Arc::clone(&engine),
+            TransferRequest { from: alice(), to: bob(), value: one_eth() },
+        );
+
+        assert!(err.is_err(), "commit must fail when sender has no balance");
+    }
+
+    #[test]
+    fn commit_transfer_recipient_created_automatically() {
+        let (engine, _dir) = make_engine();
+
+        engine.apply_deposit(alice(), one_eth() * U256::from(2)).unwrap();
+
+        commit_transfer(
+            Arc::clone(&engine),
+            TransferRequest { from: alice(), to: bob(), value: one_eth() },
+        )
+        .unwrap();
+
+        let bob_account = engine.get_account(&bob()).unwrap();
+        assert_eq!(bob_account.balance, one_eth(), "Bob must receive exactly 1 ETH");
     }
 }

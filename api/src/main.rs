@@ -7,6 +7,8 @@ mod rest;
 use std::sync::Arc;
 
 use ::state::{RocksDbBackend, StateEngine};
+use ingestor::{Ingestor, IngestorEvent};
+use tokio::sync::mpsc;
 use tonic::transport::Server as TonicServer;
 use tracing_subscriber::{fmt, EnvFilter};
 
@@ -16,6 +18,8 @@ use grpc::{proto::aura_l2_server::AuraL2Server, AuraL2Service};
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
+    dotenvy::dotenv().ok();
+
     fmt()
         .with_env_filter(
             EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info")),
@@ -30,13 +34,50 @@ async fn main() -> eyre::Result<()> {
         "Aura L2 API starting"
     );
 
-    // Open RocksDB in secondary mode — ingestor holds the primary lock.
-    // Secondary path is a scratch dir for WAL catch-up metadata.
-    let secondary_path = format!("{}-api-secondary", config.state_db_path);
-    let backend = RocksDbBackend::open_secondary(&config.state_db_path, &secondary_path)
-        .expect("Failed to open RocksDB as secondary");
+    // Open RocksDB as primary — API is the single writer (sequencer + API in one process).
+    let backend = RocksDbBackend::open(&config.state_db_path)
+        .expect("Failed to open RocksDB");
     let engine = Arc::new(StateEngine::new(backend).expect("Failed to init StateEngine"));
-    tracing::info!(root = %engine.state_root(), "StateEngine ready (secondary)");
+    tracing::info!(root = %engine.state_root(), "StateEngine ready");
+
+    // Spawn ingestor as a background task inside this process.
+    // It writes deposits into the same StateEngine via the event channel.
+    let provider_url = std::env::var("PROVIDER_URL").expect("PROVIDER_URL must be set");
+    let bridge_contract = std::env::var("BRIDGE_CONTRACT").expect("BRIDGE_CONTRACT must be set");
+
+    let (tx, mut rx) = mpsc::channel::<IngestorEvent>(100);
+
+    let engine_ingestor = Arc::clone(&engine);
+    tokio::spawn(async move {
+        tracing::info!("L1 event processor started");
+        while let Some(event) = rx.recv().await {
+            match event {
+                IngestorEvent::L1Deposit { user, amount } => {
+                    tracing::warn!(user = %user, amount = %amount, "Applying L1 deposit");
+                    match engine_ingestor.apply_deposit(user, amount) {
+                        Ok(root) => tracing::info!(user = %user, root = %root, "Deposit applied"),
+                        Err(e) => tracing::error!(error = %e, "Failed to apply deposit"),
+                    }
+                }
+                IngestorEvent::NewBlock { number, .. } => {
+                    tracing::info!(block = number, root = %engine_ingestor.state_root(), "L1 block synced");
+                }
+            }
+        }
+    });
+
+    let provider_url_clone = provider_url.clone();
+    let bridge_clone = bridge_contract.clone();
+    let tx_clone = tx.clone();
+    tokio::spawn(async move {
+        loop {
+            let ingestor = Ingestor::new(provider_url_clone.clone(), bridge_clone.clone(), tx_clone.clone());
+            if let Err(e) = ingestor.run().await {
+                tracing::error!(error = %e, "Ingestor disconnected — reconnecting in 5s");
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+            }
+        }
+    });
 
     let app_state = AppState::new(Arc::clone(&engine));
 

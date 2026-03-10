@@ -7,6 +7,10 @@ edition = "2024"
 name = "ingestor"
 path = "src/main.rs"
 
+[lib]
+name = "ingestor"
+path = "src/lib.rs"
+
 [dependencies]
 tokio = { workspace = true }
 alloy = { workspace = true, features = ["sol-types", "providers", "provider-ws", "rpc-types", "pubsub", "network"] }

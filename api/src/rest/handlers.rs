@@ -5,7 +5,7 @@ use axum::{
     extract::{Path, State},
     Json,
 };
-use executor::{simulate_transfer, TransferRequest};
+use executor::{commit_transfer, TransferRequest};
 use serde::{Deserialize, Serialize};
 
 use crate::app_state::AppState;
@@ -22,18 +22,15 @@ pub struct SubmitTxBody {
 
 #[derive(Debug, Serialize)]
 pub struct SubmitTxResponse {
-    pub success: bool,
     pub gas_used: u64,
-    pub revert_reason: Option<String>,
     pub new_sender_balance: String,
+    pub new_state_root: String,
 }
 
 pub async fn post_transaction(
     State(app): State<AppState>,
     Json(body): Json<SubmitTxBody>,
 ) -> Result<Json<SubmitTxResponse>, ApiError> {
-    app.catch_up();
-
     let from: Address = body
         .from
         .parse()
@@ -49,17 +46,16 @@ pub async fn post_transaction(
 
     let engine = Arc::clone(&app.engine);
     let result = tokio::task::spawn_blocking(move || {
-        simulate_transfer(engine, TransferRequest { from, to, value })
+        commit_transfer(engine, TransferRequest { from, to, value })
     })
     .await
     .map_err(|e| ApiError::InvalidValue(format!("join error: {e}")))?
     .map_err(ApiError::Executor)?;
 
     Ok(Json(SubmitTxResponse {
-        success: result.success,
         gas_used: result.gas_used,
-        revert_reason: result.revert_reason,
         new_sender_balance: result.new_sender_balance.to_string(),
+        new_state_root: format!("0x{}", hex::encode(result.new_state_root.0)),
     }))
 }
 
@@ -76,8 +72,6 @@ pub async fn get_account(
     State(app): State<AppState>,
     Path(address_str): Path<String>,
 ) -> Result<Json<AccountResponse>, ApiError> {
-    app.catch_up();
-
     let address: Address = address_str
         .parse()
         .map_err(|_| ApiError::InvalidAddress(address_str.clone()))?;
@@ -99,8 +93,6 @@ pub struct StateRootResponse {
 }
 
 pub async fn get_state_root(State(app): State<AppState>) -> Json<StateRootResponse> {
-    app.catch_up();
-
     let root = app.engine.state_root();
     Json(StateRootResponse {
         state_root: format!("0x{}", hex::encode(root.0)),
