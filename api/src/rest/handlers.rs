@@ -85,6 +85,39 @@ pub async fn get_account(
     }))
 }
 
+// ── GET /account/:address/proof ───────────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct AccountProofResponse {
+    pub address: String,
+    pub balance: String,
+    pub leaf_index: u64,
+    pub leaf_value: String,        // 0x-prefixed hex, 32 bytes
+    pub siblings: Vec<String>,     // 32 entries, 0x-prefixed hex
+    pub state_root: String,        // 0x-prefixed hex
+}
+
+pub async fn get_account_proof(
+    State(app): State<AppState>,
+    Path(address_str): Path<String>,
+) -> Result<Json<AccountProofResponse>, ApiError> {
+    let address: Address = address_str
+        .parse()
+        .map_err(|_| ApiError::InvalidAddress(address_str.clone()))?;
+
+    let account = app.engine.get_account(&address).map_err(ApiError::State)?;
+    let proof = app.engine.get_proof(&address).map_err(ApiError::State)?;
+
+    Ok(Json(AccountProofResponse {
+        address: format!("{address:#x}"),
+        balance: account.balance.to_string(),
+        leaf_index: proof.leaf_index.0,
+        leaf_value: format!("0x{}", hex::encode(proof.leaf_value)),
+        siblings: proof.siblings.iter().map(|s| format!("0x{}", hex::encode(s))).collect(),
+        state_root: format!("0x{}", hex::encode(proof.root.0)),
+    }))
+}
+
 // ── GET /state/root ───────────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize)]

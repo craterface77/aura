@@ -51,10 +51,13 @@ impl AccountData {
     /// This is the value stored at `merkle_index` in the Sparse Merkle Tree.
     pub fn leaf_hash(&self, address: &Address) -> [u8; 32] {
         use sha3::{Digest, Keccak256};
-        let mut hasher = Keccak256::new();
-        hasher.update(address.as_slice());
-        hasher.update(self.balance.to_be_bytes::<32>());
-        hasher.finalize().into()
+        let mut inner = Keccak256::new();
+        inner.update(address.as_slice());
+        inner.update(self.balance.to_be_bytes::<32>());
+        let inner_hash: [u8; 32] = inner.finalize().into();
+        let mut outer = Keccak256::new();
+        outer.update(inner_hash);
+        outer.finalize().into()
     }
 }
 
