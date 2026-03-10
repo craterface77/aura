@@ -1,0 +1,19 @@
+# ── Dev profile tweaks ────────────────────────────────────────────────────────
+[profile.dev]
+opt-level = 0
+# Split debug info — reduces linker work on macOS (no-op on Linux/Docker)
+split-debuginfo = "unpacked"
+
+# Dependencies compile with opt-level=3 so tests/dev runs stay fast,
+# while your own code compiles quickly with opt-level=0.
+[profile.dev.package."*"]
+opt-level = 3
+
+# ── Docker / CI release profile ───────────────────────────────────────────────
+[profile.release]
+# lto=thin: 20-40% smaller binary, much faster than lto=true
+lto = "thin"
+# Single codegen unit = smaller/faster binary (slower compile, but Docker layer is cached)
+codegen-units = 1
+# Strip debug symbols — smaller Docker image layer
+strip = "debuginfo"

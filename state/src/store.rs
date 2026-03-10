@@ -22,6 +22,25 @@ impl RocksDbBackend {
         Ok(Self { db })
     }
 
+    /// Open in secondary (read-only) mode.
+    ///
+    /// `primary_path` must point to the same directory the primary (ingestor) uses.
+    /// `secondary_path` is a scratch directory for WAL catch-up — can be a temp dir.
+    /// Call `try_catch_up_with_primary` on the returned backend to refresh state.
+    pub fn open_secondary(primary_path: &str, secondary_path: &str) -> StateResult<Self> {
+        let opts = Options::default();
+        let db = DB::open_as_secondary(&opts, primary_path, secondary_path)?;
+        tracing::info!(primary_path, secondary_path, "RocksDB opened as secondary");
+        Ok(Self { db })
+    }
+
+    /// Pull latest writes from the primary instance.
+    /// Call this before every read in the API to get fresh state.
+    pub fn try_catch_up_with_primary(&self) -> StateResult<()> {
+        self.db.try_catch_up_with_primary()?;
+        Ok(())
+    }
+
     fn address_key(address: &Address) -> [u8; 20] {
         address.0.0
     }

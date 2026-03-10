@@ -1,21 +1,21 @@
-# Multi-stage build with cargo-chef for dependency layer caching.
-# This separates slow dependency compilation (cached) from fast source compilation.
+# Multi-stage build — single builder compiles ALL workspace crates once.
+# Both `ingestor` and `api` binaries come from the same builder layer,
+# so RocksDB / alloy / revm are only compiled once.
 #
-# Stage order: chef → planner → builder → runtime
-# Rebuilding after a source-only change reuses the "builder" layer up to
-# the `COPY . .` step, so only the final `cargo build` re-runs.
+# Targets:
+#   ingestor-runtime  — used by docker-compose ingestor service
+#   api-runtime       — used by docker-compose api service
 
 # ---- Stage 1: Base with build tools ----
 FROM rust:latest AS chef
 
-# RocksDB (rocksdb crate) requires clang + cmake + C++ stdlib.
-# These are only needed in the build stages; the runtime image stays lean.
 RUN apt-get update && apt-get install -y \
     clang \
     cmake \
     libclang-dev \
     libssl-dev \
     pkg-config \
+    protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 RUN cargo install cargo-chef --locked
@@ -26,27 +26,32 @@ FROM chef AS planner
 COPY . .
 RUN cargo chef prepare --recipe-path recipe.json
 
-# ---- Stage 3: Builder — compile deps then source ----
+# ---- Stage 3: Builder — compile deps then ALL binaries ----
 FROM chef AS builder
 
 COPY --from=planner /app/recipe.json recipe.json
 
-# Compile dependencies only (this layer is cached until Cargo.lock changes).
+# Compile ALL workspace dependencies once (cached until Cargo.lock changes).
 RUN cargo chef cook --release --recipe-path recipe.json
 
-# Now copy the full source and do the final build.
 COPY . .
-RUN cargo build --release -p aura-l2-ingestor
 
-# ---- Stage 4: Runtime — same base as builder to guarantee ABI compatibility ----
-# Using rust:latest (same image as the builder) avoids glibc/libstdc++ version mismatches.
-FROM rust:latest AS runtime
+# Build both binaries in one pass — shared dep compilation.
+RUN cargo build --release -p aura-l2-ingestor -p aura-l2-api
+
+# ---- Stage 4a: Ingestor runtime ----
+FROM rust:latest AS ingestor-runtime
 
 WORKDIR /app
-
-COPY --from=builder /app/target/release/ingestor ./ingestor
-
-# State DB path is configurable via STATE_DB_PATH env var.
 RUN mkdir -p /app/data
-
+COPY --from=builder /app/target/release/ingestor ./ingestor
 ENTRYPOINT ["./ingestor"]
+
+# ---- Stage 4b: API runtime ----
+FROM rust:latest AS api-runtime
+
+WORKDIR /app
+RUN mkdir -p /app/data
+EXPOSE 50051 3000
+COPY --from=builder /app/target/release/api ./api
+ENTRYPOINT ["./api"]

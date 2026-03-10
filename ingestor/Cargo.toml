@@ -9,10 +9,10 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { workspace = true }
-alloy = { workspace = true }
+alloy = { workspace = true, features = ["sol-types", "providers", "provider-ws", "rpc-types", "pubsub", "network"] }
 eyre = "0.6.12"
-tracing = { version = "0.1.44", features = ["log"] }
-tracing-subscriber = { version = "0.3.22", features = ["registry", "env-filter"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
 futures-util = "0.3.32"
 dotenvy = "0.15.7"
 state = { package = "aura-l2-state", path = "../state" }

@@ -4,6 +4,7 @@
 #   1. anvil     — local Ethereum node (health-checked via cast block-number)
 #   2. deployer  — deploys AuraL1Bridge, writes BRIDGE_CONTRACT to .env
 #   3. ingestor  — reads .env, connects to Anvil WS, runs StateEngine
+#   4. api       — gRPC :50051 + REST :3000, reads same RocksDB as ingestor
 #
 # One command to start everything:
 #   docker-compose up --build
@@ -69,7 +70,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runtime
+      target: ingestor-runtime
     volumes:
       # Read the .env that deployer wrote
       - ./.env:/app/.env
@@ -85,6 +86,30 @@ services:
       # STATE_DB_PATH is also set inside .env, but this env var takes precedence
       # via dotenvy's behavior (env vars override .env file values).
       - STATE_DB_PATH=/app/data/state
+    restart: on-failure
+
+  # ---- API server (gRPC + REST) ----
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api-runtime
+    volumes:
+      # Shared RocksDB volume — api reads state written by ingestor
+      - state-data:/app/data
+    networks:
+      - aura-net
+    ports:
+      - "50051:50051"   # gRPC
+      - "3000:3000"     # REST
+    depends_on:
+      ingestor:
+        condition: service_started
+    environment:
+      - RUST_LOG=info
+      - STATE_DB_PATH=/app/data/state
+      - GRPC_PORT=50051
+      - REST_PORT=3000
     restart: on-failure
 
 networks:

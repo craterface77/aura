@@ -3,9 +3,13 @@ name = "aura-l2-executor"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "executor"
+path = "src/lib.rs"
+
 [dependencies]
 tokio = { workspace = true }
-alloy = { workspace = true }
+alloy = { workspace = true, features = ["consensus"] }
 state = { package = "aura-l2-state", path = "../state" }
 revm = { version = "36.0.0", default-features = false, features = ["std"] }
 thiserror = "2.0.18"

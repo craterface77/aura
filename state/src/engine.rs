@@ -1,7 +1,7 @@
 use crate::account::{AccountData, AccountNonce, MerkleIndex, MerkleProof, StateRoot};
 use crate::error::{StateError, StateResult};
 use crate::merkle::SparseMerkleTree;
-use crate::store::StateBackend;
+use crate::store::{RocksDbBackend, StateBackend};
 use alloy::primitives::{Address, U256};
 use std::sync::{Arc, RwLock};
 
@@ -127,6 +127,25 @@ impl<S: StateBackend> StateEngine<S> {
             siblings,
             root,
         })
+    }
+}
+
+impl StateEngine<RocksDbBackend> {
+    /// Pull latest writes from the primary RocksDB instance and rebuild the SMT.
+    /// Call this before reads in the API to get fresh state.
+    pub fn catch_up_with_primary(&self) -> StateResult<()> {
+        self.backend.try_catch_up_with_primary()?;
+
+        // Rebuild the in-memory SMT from the refreshed backend.
+        let accounts = self.backend.iter_accounts()?;
+        let mut tree = SparseMerkleTree::new();
+        for (address, data) in accounts {
+            let leaf = data.leaf_hash(&address);
+            tree.update(data.merkle_index, leaf);
+        }
+
+        *self.tree.write().map_err(|_| StateError::LockPoisoned)? = tree;
+        Ok(())
     }
 }
 
