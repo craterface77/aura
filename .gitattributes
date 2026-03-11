@@ -1,0 +1,3 @@
+contracts/lib/** linguist-vendored
+contracts/out/** linguist-generated
+contracts/cache/** linguist-generated
