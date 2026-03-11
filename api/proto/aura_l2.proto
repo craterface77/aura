@@ -1,0 +1,43 @@
+syntax = "proto3";
+
+package aura_l2;
+
+message Empty {}
+
+// SubmitTransaction
+message TransferRequest {
+  string from  = 1;   // hex-encoded Ethereum address (0x…)
+  string to    = 2;
+  string value = 3;   // decimal wei string
+}
+
+message TransactionResponse {
+  uint64 gas_used           = 1;
+  string new_sender_balance = 2;   // decimal wei string
+  string new_state_root     = 3;   // 0x-prefixed hex — updated after commit
+}
+
+// GetAccountProof
+message AccountProofRequest {
+  string address = 1;   // hex-encoded Ethereum address
+}
+
+message AccountProofResponse {
+  string        balance    = 1;   // decimal wei string
+  uint64        nonce      = 2;
+  string        state_root = 3;   // 0x-prefixed hex
+  bytes         leaf_value = 4;   // 32 bytes
+  repeated bytes siblings  = 5;   // 32 bytes each, depth-32 SMT → 32 entries
+  uint64        leaf_index = 6;
+}
+
+// GetStateRoot
+message StateRootResponse {
+  string state_root = 1;   // 0x-prefixed hex-encoded 32-byte root
+}
+
+service AuraL2 {
+  rpc SubmitTransaction (TransferRequest)     returns (TransactionResponse);
+  rpc GetAccountProof   (AccountProofRequest) returns (AccountProofResponse);
+  rpc GetStateRoot      (Empty)               returns (StateRootResponse);
+}

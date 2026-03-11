@@ -1,5 +1,5 @@
 [package]
-name = "aura-l2-api"
+name    = "aura-l2-api"
 version = "0.1.0"
 edition = "2024"
 
@@ -9,3 +9,28 @@ path = "src/main.rs"
 
 [dependencies]
 tokio = { workspace = true }
+alloy = { workspace = true, features = ["consensus"] }
+
+state    = { package = "aura-l2-state",    path = "../state"    }
+executor = { package = "aura-l2-executor", path = "../executor" }
+ingestor = { package = "aura-l2-ingestor", path = "../ingestor" }
+
+tonic = "0.13.0"
+prost = "0.13.5"
+
+axum       = "0.8.4"
+tower-http = { version = "0.6.6", features = ["trace"] }
+
+serde      = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+hex        = "0.4.3"
+
+dotenvy   = "0.15.7"
+thiserror = "2.0.18"
+eyre      = "0.6.12"
+
+tracing            = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+
+[build-dependencies]
+tonic-build = "0.13.0"

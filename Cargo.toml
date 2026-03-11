@@ -1,7 +1,7 @@
 [workspace]
-members = ["core", "api", "indexer"]
+members = ["executor", "api", "ingestor", "state"]
 resolver = "2"
 
 [workspace.dependencies]
-tokio = { version = "1.49.0", features = ["full"] }
-alloy = { version = "1.7.3", features = ["full"] }
+tokio = { version = "1.49.0", features = ["rt-multi-thread", "macros", "sync", "time", "net"] }
+alloy = { version = "1.7.3" }

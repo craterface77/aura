@@ -1,0 +1,88 @@
+# Aura L2 — Local Development Stack
+#
+# Startup order:
+#   1. anvil     — local Ethereum node (health-checked via cast block-number)
+#   2. deployer  — deploys AuraL1Bridge, writes BRIDGE_CONTRACT to .env
+#   3. api       — gRPC :50051 + REST :3000, primary RocksDB, embedded L1 ingestor
+#
+# One command to start everything:
+#   docker-compose up --build
+
+services:
+  # ---- Local Ethereum node ----
+  anvil:
+    image: ghcr.io/foundry-rs/foundry:latest
+    entrypoint:
+      - anvil
+      - --host
+      - "0.0.0.0"
+      - --port
+      - "8545"
+      - --block-time
+      - "2"
+    ports:
+      - "8545:8545"
+    networks:
+      - aura-net
+    healthcheck:
+      test:
+        - CMD
+        - cast
+        - block-number
+        - --rpc-url
+        - http://localhost:8545
+      interval: 2s
+      timeout: 5s
+      retries: 15
+      start_period: 3s
+
+  # ---- Contract deployer (one-shot init container) ----
+  deployer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.deployer
+    volumes:
+      - ./.env:/app/.env
+      - ./contracts:/app/contracts
+    networks:
+      - aura-net
+    environment:
+      - ANVIL_URL=http://anvil:8545
+    depends_on:
+      anvil:
+        condition: service_healthy
+
+  # ---- API server: gRPC + REST + embedded L1 ingestor ----
+  #
+  # Holds primary RocksDB lock. Ingestor runs as a tokio task inside this process,
+  # writing L1 deposits directly into the same StateEngine. POST /tx commits
+  # transfers via commit_transfer (revm simulate → RocksDB write → SMT update).
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: api-runtime
+    volumes:
+      - ./.env:/app/.env
+      - state-data:/app/data
+    networks:
+      - aura-net
+    ports:
+      - "50051:50051"   # gRPC
+      - "3000:3000"     # REST
+    depends_on:
+      deployer:
+        condition: service_completed_successfully
+    environment:
+      - RUST_LOG=info
+      - STATE_DB_PATH=/app/data/state
+      - GRPC_PORT=50051
+      - REST_PORT=3000
+    restart: on-failure
+
+networks:
+  aura-net:
+    driver: bridge
+
+volumes:
+  state-data:

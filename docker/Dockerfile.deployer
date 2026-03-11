@@ -1,0 +1,11 @@
+# Deployer: uses the official Foundry image to deploy the AuraL1Bridge contract
+# to a running Anvil instance and write the resulting address to .env.
+FROM ghcr.io/foundry-rs/foundry:latest
+
+WORKDIR /app
+
+# Copy the Solidity contracts and the deploy script.
+COPY contracts/ ./contracts/
+COPY docker/deploy.sh ./deploy.sh
+
+ENTRYPOINT ["/bin/sh", "./deploy.sh"]

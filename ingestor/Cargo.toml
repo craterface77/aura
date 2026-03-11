@@ -1,0 +1,22 @@
+[package]
+name = "aura-l2-ingestor"
+version = "0.1.0"
+edition = "2024"
+
+[[bin]]
+name = "ingestor"
+path = "src/main.rs"
+
+[lib]
+name = "ingestor"
+path = "src/lib.rs"
+
+[dependencies]
+tokio = { workspace = true }
+alloy = { workspace = true, features = ["sol-types", "providers", "provider-ws", "rpc-types", "pubsub", "network"] }
+eyre = "0.6.12"
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+futures-util = "0.3.32"
+dotenvy = "0.15.7"
+state = { package = "aura-l2-state", path = "../state" }
